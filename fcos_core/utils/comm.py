@@ -117,5 +117,12 @@ def reduce_dict(input_dict, average=True):
     return reduced_dict
 
 
+def reduce_tensor(tensor):
+    rt = tensor.clone()
+    dist.all_reduce(rt, op=dist.ReduceOp.SUM)
+    rt /= get_world_size()
+    return rt
+
+
 def is_pytorch_1_1_0_or_later():
     return [int(_) for _ in torch.__version__.split(".")[:3]] >= [1, 1, 0]

@@ -19,7 +19,9 @@ from fcos_core.utils.miscellaneous import mkdir
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PyTorch Object Detection Inference")
+    parser = argparse.ArgumentParser(
+        description="PyTorch Object Detection Inference"
+    )
     parser.add_argument(
         "--config-file",
         default="/private/home/fmassa/github/detectron.pytorch_v2/configs/e2e_faster_rcnn_R_50_C4_1x_caffe2.yaml",
@@ -36,7 +38,9 @@ def main():
 
     args = parser.parse_args()
 
-    num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
+    num_gpus = (
+        int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
+    )
     distributed = num_gpus > 1
 
     if distributed:
@@ -74,17 +78,25 @@ def main():
     dataset_names = cfg.DATASETS.TEST
     if cfg.OUTPUT_DIR:
         for idx, dataset_name in enumerate(dataset_names):
-            output_folder = os.path.join(cfg.OUTPUT_DIR, "inference", dataset_name)
+            output_folder = os.path.join(
+                cfg.OUTPUT_DIR, "inference", dataset_name
+            )
             mkdir(output_folder)
             output_folders[idx] = output_folder
-    data_loaders_val = make_data_loader(cfg, is_train=False, is_distributed=distributed)
-    for output_folder, dataset_name, data_loader_val in zip(output_folders, dataset_names, data_loaders_val):
+    data_loaders_val = make_data_loader(
+        cfg, phase="test", is_distributed=distributed
+    )
+    for output_folder, dataset_name, data_loader_val in zip(
+        output_folders, dataset_names, data_loaders_val
+    ):
         inference(
             model,
             data_loader_val,
             dataset_name=dataset_name,
             iou_types=iou_types,
-            box_only=False if cfg.MODEL.FCOS_ON or cfg.MODEL.RETINANET_ON else cfg.MODEL.RPN_ONLY,
+            box_only=False
+            if cfg.MODEL.FCOS_ON or cfg.MODEL.RETINANET_ON
+            else cfg.MODEL.RPN_ONLY,
             device=cfg.MODEL.DEVICE,
             expected_results=cfg.TEST.EXPECTED_RESULTS,
             expected_results_sigma_tol=cfg.TEST.EXPECTED_RESULTS_SIGMA_TOL,

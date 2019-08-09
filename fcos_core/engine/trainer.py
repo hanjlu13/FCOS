@@ -6,8 +6,18 @@ import time
 import torch
 import torch.distributed as dist
 
-from fcos_core.utils.comm import get_world_size, is_pytorch_1_1_0_or_later
+from fcos_core.utils.comm import (
+    get_world_size,
+    is_pytorch_1_1_0_or_later,
+    is_main_process,
+    reduce_tensor,
+    synchronize,
+)
+from fcos_core.data.datasets.evaluation import evaluate
 from fcos_core.utils.metric_logger import MetricLogger
+from fcos_core.utils.tf_logger import TensorboardWriter
+from .val import eval_model
+from .inference import _accumulate_predictions_from_multiple_gpus
 
 
 def reduce_loss_dict(loss_dict):
@@ -36,25 +46,28 @@ def reduce_loss_dict(loss_dict):
 
 
 def do_train(
+    cfg,
     model,
-    data_loader,
+    train_loader,
+    val_loader,
     optimizer,
     scheduler,
     checkpointer,
     device,
     checkpoint_period,
+    val_period,
     arguments,
 ):
     logger = logging.getLogger("fcos_core.trainer")
     logger.info("Start training")
     meters = MetricLogger(delimiter="  ")
-    max_iter = len(data_loader)
+    max_iter = len(train_loader)
     start_iter = arguments["iteration"]
     model.train()
     start_training_time = time.time()
     end = time.time()
     pytorch_1_1_0_or_later = is_pytorch_1_1_0_or_later()
-    for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
+    for iteration, (images, targets, _) in enumerate(train_loader, start_iter):
         data_time = time.time() - end
         iteration = iteration + 1
         arguments["iteration"] = iteration
@@ -87,6 +100,7 @@ def do_train(
         meters.update(time=batch_time, data=data_time)
 
         eta_seconds = meters.time.global_avg * (max_iter - iteration)
+        eta_hours = eta_seconds / 3600
         eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
 
         if iteration % 20 == 0 or iteration == max_iter:
@@ -102,11 +116,69 @@ def do_train(
                 ).format(
                     eta=eta_string,
                     iter=iteration,
-                    meters=str(meters),
+                    meters=(meters),
                     lr=optimizer.param_groups[0]["lr"],
                     memory=torch.cuda.max_memory_allocated() / 1024.0 / 1024.0,
                 )
             )
+            if is_main_process():
+                TensorboardWriter.write_scalar(
+                    ["train/lr", "train/mem", "train/eta"],
+                    [
+                        optimizer.param_groups[0]["lr"],
+                        torch.cuda.max_memory_allocated() / 1024.0 / 1024.0,
+                        eta_hours,
+                    ],
+                    iteration,
+                )
+                # write losses
+                TensorboardWriter.write_scalars(
+                    ["train/losses", "train/time"],
+                    [
+                        meters.get_metric(
+                            metric_names=[
+                                "loss",
+                                "loss_centerness",
+                                "loss_cls",
+                                "loss_reg",
+                            ]
+                        ),
+                        meters.get_metric(metric_names=["time", "data"]),
+                    ],
+                    iteration,
+                )
+
+        if ((iteration) % val_period == 0) or (iteration == max_iter):
+            predictions, val_loss = eval_model(model, val_loader)
+            synchronize()
+            val_loss = reduce_tensor(val_loss)
+            predictions = _accumulate_predictions_from_multiple_gpus(
+                predictions
+            )
+            if is_main_process():
+                extra_args = dict(
+                    box_only=False,
+                    iou_types=("bbox",),
+                    expected_results=cfg.VAL.EXPECTED_RESULTS,
+                    expected_results_sigma_tol=cfg.VAL.EXPECTED_RESULTS_SIGMA_TOL,
+                )
+                _, _, ap_stats = evaluate(
+                    dataset=val_loader.dataset,
+                    predictions=predictions,
+                    output_folder=None,
+                    **extra_args
+                )
+                ap_keys = list(ap_stats.keys())
+                keys = ["val/loss"] + [
+                    "val/{}".format(_key) for _key in ap_keys
+                ]
+                vals = [float(val_loss.cpu().numpy())] + [
+                    ap_stats[_key] for _key in ap_keys
+                ]
+                TensorboardWriter.write_scalar(keys, vals, iteration)
+            synchronize()
+            model.train()
+
         if iteration % checkpoint_period == 0:
             checkpointer.save("model_{:07d}".format(iteration), **arguments)
         if iteration == max_iter:

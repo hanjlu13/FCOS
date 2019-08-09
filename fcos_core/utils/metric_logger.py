@@ -49,18 +49,30 @@ class MetricLogger(object):
             assert isinstance(v, (float, int))
             self.meters[k].update(v)
 
+    def get_metric(self, metric_names):
+        metric_dict = {}
+        for name, meter in self.meters.items():
+            if name in metric_names:
+                metric_dict[name] = meter.median
+        return metric_dict
+
     def __getattr__(self, attr):
         if attr in self.meters:
             return self.meters[attr]
         if attr in self.__dict__:
             return self.__dict__[attr]
-        raise AttributeError("'{}' object has no attribute '{}'".format(
-                    type(self).__name__, attr))
+        raise AttributeError(
+            "'{}' object has no attribute '{}'".format(
+                type(self).__name__, attr
+            )
+        )
 
     def __str__(self):
         loss_str = []
         for name, meter in self.meters.items():
             loss_str.append(
-                "{}: {:.4f} ({:.4f})".format(name, meter.median, meter.global_avg)
+                "{}: {:.4f} ({:.4f})".format(
+                    name, meter.median, meter.global_avg
+                )
             )
         return self.delimiter.join(loss_str)

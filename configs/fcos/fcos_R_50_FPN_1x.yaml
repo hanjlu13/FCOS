@@ -10,8 +10,11 @@ MODEL:
   RETINANET:
     USE_C5: False # FCOS uses P5 instead of C5
 DATASETS:
-  TRAIN: ("coco_2014_train", "coco_2014_valminusminival")
-  TEST: ("coco_2014_minival",)
+  TEST: ("voc2007_test",)
+  IMG_DIRS_TRAIN: ("/home/hancock/training_data/VOC/VOCdevkit/VOC2007/JPEGImages","/home/hancock/training_data/VOC/VOCdevkit/VOC2007/JPEGImages")
+  ANNOTS_TRAIN: ("/home/hancock/training_data/VOC/PASCAL_VOC/pascal_train2007.json", "/home/hancock/training_data/VOC/PASCAL_VOC/pascal_val2007.json")
+  IMG_DIRS_TEST: ("/home/hancock/training_data/VOC/VOCdevkit/VOC2007/JPEGImages",)
+  ANNOTS_TEST: ("/home/hancock/training_data/VOC/PASCAL_VOC/pascal_test2007.json",)
 INPUT:
   MIN_SIZE_TRAIN: (800,)
   MAX_SIZE_TRAIN: 1333
@@ -22,7 +25,8 @@ DATALOADER:
 SOLVER:
   BASE_LR: 0.01
   WEIGHT_DECAY: 0.0001
-  STEPS: (60000, 80000)
-  MAX_ITER: 90000
-  IMS_PER_BATCH: 16
+  STEPS: (100, 200)
+  MAX_ITER: 300
+  IMS_PER_BATCH: 4 
   WARMUP_METHOD: "constant"
+OUTPUT_DIR: "/tmp/dataload_test"

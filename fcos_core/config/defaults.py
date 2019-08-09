@@ -44,7 +44,10 @@ _C.INPUT = CN()
 # Size of the smallest side of the image during training
 _C.INPUT.MIN_SIZE_TRAIN = (800,)  # (800,)
 # The range of the smallest side for multi-scale training
-_C.INPUT.MIN_SIZE_RANGE_TRAIN = (-1, -1)  # -1 means disabled and it will use MIN_SIZE_TRAIN
+_C.INPUT.MIN_SIZE_RANGE_TRAIN = (
+    -1,
+    -1,
+)  # -1 means disabled and it will use MIN_SIZE_TRAIN
 # Maximum size of the side of the image during training
 _C.INPUT.MAX_SIZE_TRAIN = 1333
 # Size of the smallest side of the image during testing
@@ -54,7 +57,7 @@ _C.INPUT.MAX_SIZE_TEST = 1333
 # Values to be used for image normalization
 _C.INPUT.PIXEL_MEAN = [102.9801, 115.9465, 122.7717]
 # Values to be used for image normalization
-_C.INPUT.PIXEL_STD = [1., 1., 1.]
+_C.INPUT.PIXEL_STD = [1.0, 1.0, 1.0]
 # Convert image to BGR format (for Caffe2 models), in range 0-255
 _C.INPUT.TO_BGR255 = True
 
@@ -63,10 +66,19 @@ _C.INPUT.TO_BGR255 = True
 # Dataset
 # -----------------------------------------------------------------------------
 _C.DATASETS = CN()
-# List of the dataset names for training, as present in paths_catalog.py
+# List of the dataset names for training
 _C.DATASETS.TRAIN = ()
-# List of the dataset names for testing, as present in paths_catalog.py
+# List of the dataset names for testing
 _C.DATASETS.TEST = ()
+# Define Image Annotation file for training
+_C.DATASETS.IMG_DIRS_TRAIN = ()
+_C.DATASETS.ANNOTS_TRAIN = ()
+# Define Image Annotation file for testing
+_C.DATASETS.IMG_DIRS_TEST = ()
+_C.DATASETS.ANNOTS_TEST = ()
+# Define Image Annotation file for validating
+_C.DATASETS.IMG_DIRS_VAL = ()
+_C.DATASETS.ANNOTS_VAL = ()
 
 # -----------------------------------------------------------------------------
 # DataLoader
@@ -179,7 +191,7 @@ _C.MODEL.ROI_HEADS.FG_IOU_THRESHOLD = 0.5
 _C.MODEL.ROI_HEADS.BG_IOU_THRESHOLD = 0.5
 # Default weights on (dx, dy, dw, dh) for normalizing bbox regression targets
 # These are empirically chosen to approximately lead to unit variance targets
-_C.MODEL.ROI_HEADS.BBOX_REG_WEIGHTS = (10., 10., 5., 5.)
+_C.MODEL.ROI_HEADS.BBOX_REG_WEIGHTS = (10.0, 10.0, 5.0, 5.0)
 # RoI minibatch size *per image* (number of regions of interest [ROIs])
 # Total number of RoIs per training minibatch =
 #   TRAIN.BATCH_SIZE_PER_IM * TRAIN.IMS_PER_BATCH
@@ -399,6 +411,7 @@ _C.MODEL.FBNET.RPN_BN_TYPE = ""
 # Solver
 # ---------------------------------------------------------------------------- #
 _C.SOLVER = CN()
+_C.SOLVER.LR_SCHEDULER = "MultiStep"
 _C.SOLVER.MAX_ITER = 40000
 
 _C.SOLVER.BASE_LR = 0.001
@@ -411,6 +424,8 @@ _C.SOLVER.WEIGHT_DECAY_BIAS = 0
 
 _C.SOLVER.GAMMA = 0.1
 _C.SOLVER.STEPS = (30000,)
+
+_C.SOLVER.ETA_MIN = 0.1
 
 _C.SOLVER.WARMUP_FACTOR = 1.0 / 3
 _C.SOLVER.WARMUP_ITERS = 500
@@ -435,6 +450,20 @@ _C.TEST.EXPECTED_RESULTS_SIGMA_TOL = 4
 _C.TEST.IMS_PER_BATCH = 8
 # Number of detections per image
 _C.TEST.DETECTIONS_PER_IMG = 100
+
+# ---------------------------------------------------------------------------- #
+# Specific test options
+# ---------------------------------------------------------------------------- #
+_C.VAL = CN()
+_C.VAL.PERIOD = 2500
+_C.VAL.EXPECTED_RESULTS = []
+_C.VAL.EXPECTED_RESULTS_SIGMA_TOL = 4
+# Number of images per batch
+# This is global, so if we have 8 GPUs and IMS_PER_BATCH = 16, each GPU will
+# see 2 images per batch
+_C.VAL.IMS_PER_BATCH = 4
+# Number of detections per image
+_C.VAL.DETECTIONS_PER_IMG = 100
 
 
 # ---------------------------------------------------------------------------- #

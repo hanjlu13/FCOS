@@ -6,6 +6,7 @@ import logging
 import torch.utils.data
 from fcos_core.utils.comm import get_world_size
 from fcos_core.utils.imports import import_file
+from fcos_core.data.datasets import COCODataset
 
 from . import datasets as D
 from . import samplers
@@ -14,34 +15,26 @@ from .collate_batch import BatchCollator
 from .transforms import build_transforms
 
 
-def build_dataset(dataset_list, transforms, dataset_catalog, is_train=True):
+def build_dataset(img_roots, ann_files, transforms, is_train=True):
     """
     Arguments:
-        dataset_list (list[str]): Contains the names of the datasets, i.e.,
-            coco_2014_trian, coco_2014_val, etc
+        img_roots (list[str]): Contains the path to specific datasets
+        annots (list[str]): Contains the annots for specific datasets
         transforms (callable): transforms to apply to each (image, target) sample
         dataset_catalog (DatasetCatalog): contains the information on how to
             construct a dataset.
         is_train (bool): whether to setup the dataset for training or testing
     """
-    if not isinstance(dataset_list, (list, tuple)):
-        raise RuntimeError(
-            "dataset_list should be a list of strings, got {}".format(dataset_list)
-        )
+
     datasets = []
-    for dataset_name in dataset_list:
-        data = dataset_catalog.get(dataset_name)
-        factory = getattr(D, data["factory"])
-        args = data["args"]
+    for img_root, ann_file in zip(img_roots, ann_files):
         # for COCODataset, we want to remove images without annotations
         # during training
-        if data["factory"] == "COCODataset":
-            args["remove_images_without_annotations"] = is_train
-        if data["factory"] == "PascalVOCDataset":
-            args["use_difficult"] = not is_train
+        args = dict(root=img_root, ann_file=ann_file)
+        args["remove_images_without_annotations"] = is_train
         args["transforms"] = transforms
-        # make dataset from factory
-        dataset = factory(**args)
+
+        dataset = COCODataset(**args)
         datasets.append(dataset)
 
     # for testing, return a list of datasets
@@ -83,7 +76,12 @@ def _compute_aspect_ratios(dataset):
 
 
 def make_batch_data_sampler(
-    dataset, sampler, aspect_grouping, images_per_batch, num_iters=None, start_iter=0
+    dataset,
+    sampler,
+    aspect_grouping,
+    images_per_batch,
+    num_iters=None,
+    start_iter=0,
 ):
     if aspect_grouping:
         if not isinstance(aspect_grouping, (list, tuple)):
@@ -104,9 +102,14 @@ def make_batch_data_sampler(
     return batch_sampler
 
 
-def make_data_loader(cfg, is_train=True, is_distributed=False, start_iter=0):
+def make_data_loader(cfg, phase="train", is_distributed=False, start_iter=0):
     num_gpus = get_world_size()
-    if is_train:
+
+    if phase == "train":
+        is_train = True
+    else:
+        is_train = False
+    if phase == "train":
         images_per_batch = cfg.SOLVER.IMS_PER_BATCH
         assert (
             images_per_batch % num_gpus == 0
@@ -115,8 +118,8 @@ def make_data_loader(cfg, is_train=True, is_distributed=False, start_iter=0):
         images_per_gpu = images_per_batch // num_gpus
         shuffle = True
         num_iters = cfg.SOLVER.MAX_ITER
-    else:
-        images_per_batch = cfg.TEST.IMS_PER_BATCH
+    elif phase == "val" or phase == "TEST":
+        images_per_batch = eval("cfg.{}.IMS_PER_BATCH".format(phase.upper()))
         assert (
             images_per_batch % num_gpus == 0
         ), "TEST.IMS_PER_BATCH ({}) must be divisible by the number "
@@ -144,20 +147,22 @@ def make_data_loader(cfg, is_train=True, is_distributed=False, start_iter=0):
     # but the code supports more general grouping strategy
     aspect_grouping = [1] if cfg.DATALOADER.ASPECT_RATIO_GROUPING else []
 
-    paths_catalog = import_file(
-        "fcos_core.config.paths_catalog", cfg.PATHS_CATALOG, True
-    )
-    DatasetCatalog = paths_catalog.DatasetCatalog
-    dataset_list = cfg.DATASETS.TRAIN if is_train else cfg.DATASETS.TEST
+    img_roots = eval("cfg.DATASETS.IMG_DIRS_{}".format(phase.upper()))
+    ann_files = eval("cfg.DATASETS.ANNOTS_{}".format(phase.upper()))
 
     transforms = build_transforms(cfg, is_train)
-    datasets = build_dataset(dataset_list, transforms, DatasetCatalog, is_train)
+    datasets = build_dataset(img_roots, ann_files, transforms, is_train)
 
     data_loaders = []
     for dataset in datasets:
         sampler = make_data_sampler(dataset, shuffle, is_distributed)
         batch_sampler = make_batch_data_sampler(
-            dataset, sampler, aspect_grouping, images_per_gpu, num_iters, start_iter
+            dataset,
+            sampler,
+            aspect_grouping,
+            images_per_gpu,
+            num_iters,
+            start_iter,
         )
         collator = BatchCollator(cfg.DATALOADER.SIZE_DIVISIBILITY)
         num_workers = cfg.DATALOADER.NUM_WORKERS

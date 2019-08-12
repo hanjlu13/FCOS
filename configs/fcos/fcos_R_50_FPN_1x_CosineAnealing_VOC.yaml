@@ -3,6 +3,8 @@ MODEL:
   WEIGHT: "catalog://ImageNetPretrained/MSRA/R-50"
   RPN_ONLY: True
   FCOS_ON: True
+  FCOS:
+    NUM_CLASSES: 21
   BACKBONE:
     CONV_BODY: "R-50-FPN-RETINANET"
   RESNETS:
@@ -10,23 +12,29 @@ MODEL:
   RETINANET:
     USE_C5: False # FCOS uses P5 instead of C5
 DATASETS:
-  TEST: ("coco2017",)
+  TEST: ("voc2007_test",)
   IMG_DIRS_TRAIN: ("/home/hancock/training_data/VOC/VOCdevkit/VOC2007/JPEGImages","/home/hancock/training_data/VOC/VOCdevkit/VOC2007/JPEGImages")
   ANNOTS_TRAIN: ("/home/hancock/training_data/VOC/PASCAL_VOC/pascal_train2007.json", "/home/hancock/training_data/VOC/PASCAL_VOC/pascal_val2007.json")
-  IMG_DIRS_TEST: ("/home/hancock/mscoco/val2017",)
-  ANNOTS_TEST: ("/home/hancock/mscoco/annotations/instances_val2017.json",)
+  IMG_DIRS_VAL: ("/home/hancock/training_data/VOC/VOCdevkit/VOC2007/JPEGImages",)
+  ANNOTS_VAL: ("/home/hancock/training_data/VOC/PASCAL_VOC/pascal_test2007.json",)
+  IMG_DIRS_TEST: ("/home/hancock/training_data/VOC/VOCdevkit/VOC2007/JPEGImages",)
+  ANNOTS_TEST: ("/home/hancock/training_data/VOC/PASCAL_VOC/pascal_test2007.json",)
 INPUT:
   MIN_SIZE_TRAIN: (800,)
   MAX_SIZE_TRAIN: 1333
   MIN_SIZE_TEST: 800
   MAX_SIZE_TEST: 1333
 DATALOADER:
-  SIZE_DIVISIBILITY: 32
+  SIZE_DIVISIBILITY: 32 
 SOLVER:
-  BASE_LR: 0.01
+  LR_SCHEDULER: "CosineAnealing"
+  WARMUP_ITERS: 2000 
+  BASE_LR: 0.0025
   WEIGHT_DECAY: 0.0001
-  STEPS: (100, 200)
-  MAX_ITER: 300
+  ETA_MIN: 0.0
+  MAX_ITER: 150000
   IMS_PER_BATCH: 4 
-  WARMUP_METHOD: "constant"
-OUTPUT_DIR: "/tmp/coco2017_test"
+  WARMUP_METHOD: "linear"
+VAL:
+  PERIOD: 5000
+OUTPUT_DIR: "/home/hancock/data/training_records/fcos/VOC/FCOS_R50_0.0025"

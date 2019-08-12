@@ -76,12 +76,7 @@ def _compute_aspect_ratios(dataset):
 
 
 def make_batch_data_sampler(
-    dataset,
-    sampler,
-    aspect_grouping,
-    images_per_batch,
-    num_iters=None,
-    start_iter=0,
+    dataset, sampler, aspect_grouping, images_per_batch, num_iters=None, start_iter=0
 ):
     if aspect_grouping:
         if not isinstance(aspect_grouping, (list, tuple)):
@@ -118,7 +113,7 @@ def make_data_loader(cfg, phase="train", is_distributed=False, start_iter=0):
         images_per_gpu = images_per_batch // num_gpus
         shuffle = True
         num_iters = cfg.SOLVER.MAX_ITER
-    elif phase == "val" or phase == "TEST":
+    elif phase == "val" or phase == "test":
         images_per_batch = eval("cfg.{}.IMS_PER_BATCH".format(phase.upper()))
         assert (
             images_per_batch % num_gpus == 0
@@ -157,12 +152,7 @@ def make_data_loader(cfg, phase="train", is_distributed=False, start_iter=0):
     for dataset in datasets:
         sampler = make_data_sampler(dataset, shuffle, is_distributed)
         batch_sampler = make_batch_data_sampler(
-            dataset,
-            sampler,
-            aspect_grouping,
-            images_per_gpu,
-            num_iters,
-            start_iter,
+            dataset, sampler, aspect_grouping, images_per_gpu, num_iters, start_iter
         )
         collator = BatchCollator(cfg.DATALOADER.SIZE_DIVISIBILITY)
         num_workers = cfg.DATALOADER.NUM_WORKERS

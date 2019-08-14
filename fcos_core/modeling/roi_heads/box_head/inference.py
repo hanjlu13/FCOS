@@ -5,6 +5,8 @@ from torch import nn
 
 from fcos_core.structures.bounding_box import BoxList
 from fcos_core.structures.boxlist_ops import boxlist_nms
+from fcos_core.layers import nms as _box_nms
+from fcos_core.utils.softnms import box_softnms as softnms
 from fcos_core.structures.boxlist_ops import cat_boxlist
 from fcos_core.modeling.box_coder import BoxCoder
 
@@ -22,7 +24,8 @@ class PostProcessor(nn.Module):
         nms=0.5,
         detections_per_img=100,
         box_coder=None,
-        cls_agnostic_bbox_reg=False
+        cls_agnostic_bbox_reg=False,
+        softnms=False,
     ):
         """
         Arguments:
@@ -36,9 +39,13 @@ class PostProcessor(nn.Module):
         self.nms = nms
         self.detections_per_img = detections_per_img
         if box_coder is None:
-            box_coder = BoxCoder(weights=(10., 10., 5., 5.))
+            box_coder = BoxCoder(weights=(10.0, 10.0, 5.0, 5.0))
         self.box_coder = box_coder
         self.cls_agnostic_bbox_reg = cls_agnostic_bbox_reg
+        if softnms:
+            self.nms_func = softnms
+        else:
+            self.nms_func = _box_nms
 
     def forward(self, x, boxes):
         """
@@ -123,11 +130,12 @@ class PostProcessor(nn.Module):
             boxlist_for_class = BoxList(boxes_j, boxlist.size, mode="xyxy")
             boxlist_for_class.add_field("scores", scores_j)
             boxlist_for_class = boxlist_nms(
-                boxlist_for_class, self.nms
+                boxlist_for_class, self.nms, nms_func=self.nms_func
             )
             num_labels = len(boxlist_for_class)
             boxlist_for_class.add_field(
-                "labels", torch.full((num_labels,), j, dtype=torch.int64, device=device)
+                "labels",
+                torch.full((num_labels,), j, dtype=torch.int64, device=device),
             )
             result.append(boxlist_for_class)
 
@@ -138,7 +146,8 @@ class PostProcessor(nn.Module):
         if number_of_detections > self.detections_per_img > 0:
             cls_scores = result.get_field("scores")
             image_thresh, _ = torch.kthvalue(
-                cls_scores.cpu(), number_of_detections - self.detections_per_img + 1
+                cls_scores.cpu(),
+                number_of_detections - self.detections_per_img + 1,
             )
             keep = cls_scores >= image_thresh.item()
             keep = torch.nonzero(keep).squeeze(1)
@@ -162,6 +171,6 @@ def make_roi_box_post_processor(cfg):
         nms_thresh,
         detections_per_img,
         box_coder,
-        cls_agnostic_bbox_reg
+        cls_agnostic_bbox_reg,
     )
     return postprocessor

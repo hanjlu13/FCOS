@@ -4,9 +4,12 @@ import torch
 from .bounding_box import BoxList
 
 from fcos_core.layers import nms as _box_nms
+from fcos_core.utils.softnms import box_softnms as softnms
 
 
-def boxlist_nms(boxlist, nms_thresh, max_proposals=-1, score_field="scores"):
+def boxlist_nms(
+    boxlist, nms_thresh, max_proposals=-1, score_field="scores", nms_func=None
+):
     """
     Performs non-maximum suppression on a boxlist, with scores specified
     in a boxlist field via score_field.
@@ -23,10 +26,13 @@ def boxlist_nms(boxlist, nms_thresh, max_proposals=-1, score_field="scores"):
     mode = boxlist.mode
     boxlist = boxlist.convert("xyxy")
     boxes = boxlist.bbox
+    if len(boxes) == 0:
+        return boxlist
     score = boxlist.get_field(score_field)
-    keep = _box_nms(boxes, score, nms_thresh)
+    # keep = _box_nms(boxes, score, nms_thresh)
+    keep = nms_func(boxes, score, nms_thresh)
     if max_proposals > 0:
-        keep = keep[: max_proposals]
+        keep = keep[:max_proposals]
     boxlist = boxlist[keep]
     return boxlist.convert(mode)
 
@@ -42,9 +48,7 @@ def remove_small_boxes(boxlist, min_size):
     # TODO maybe add an API for querying the ws / hs
     xywh_boxes = boxlist.convert("xywh").bbox
     _, _, ws, hs = xywh_boxes.unbind(dim=1)
-    keep = (
-        (ws >= min_size) & (hs >= min_size)
-    ).nonzero().squeeze(1)
+    keep = ((ws >= min_size) & (hs >= min_size)).nonzero().squeeze(1)
     return boxlist[keep]
 
 
@@ -66,7 +70,10 @@ def boxlist_iou(boxlist1, boxlist2):
     """
     if boxlist1.size != boxlist2.size:
         raise RuntimeError(
-                "boxlists should have same image size, got {}, {}".format(boxlist1, boxlist2))
+            "boxlists should have same image size, got {}, {}".format(
+                boxlist1, boxlist2
+            )
+        )
 
     N = len(boxlist1)
     M = len(boxlist2)

@@ -19,7 +19,7 @@ def compute_on_dataset(model, data_loader, device, timer=None):
     results_dict = {}
     cpu_device = torch.device("cpu")
     meters = MetricLogger(delimiter="  ")
-    for i, batch in enumerate(tqdm(data_loader)):
+    for i, batch in enumerate(data_loader):
         images, targets, image_ids = batch
         images = images.to(device)
         with torch.no_grad():

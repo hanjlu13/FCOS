@@ -13,12 +13,27 @@ from .roi_pool import ROIPool
 from .roi_pool import roi_pool
 from .smooth_l1_loss import smooth_l1_loss
 from .sigmoid_focal_loss import SigmoidFocalLoss
-from .iou_loss import IOULoss
+from .iou_loss import IOULoss, Bounded_IOULoss, make_iou_loss, GIOULoss
 from .scale import Scale
 
 
-__all__ = ["nms", "roi_align", "ROIAlign", "roi_pool", "ROIPool",
-           "smooth_l1_loss", "Conv2d", "ConvTranspose2d", "interpolate",
-           "BatchNorm2d", "FrozenBatchNorm2d", "SigmoidFocalLoss", "IOULoss",
-           "Scale"]
+__all__ = [
+    "nms",
+    "roi_align",
+    "ROIAlign",
+    "roi_pool",
+    "ROIPool",
+    "smooth_l1_loss",
+    "Conv2d",
+    "ConvTranspose2d",
+    "interpolate",
+    "BatchNorm2d",
+    "FrozenBatchNorm2d",
+    "SigmoidFocalLoss",
+    "IOULoss",
+    "Scale",
+    "Bounded_IOULoss",
+    "make_iou_loss",
+    "GIOULoss",
+]
 

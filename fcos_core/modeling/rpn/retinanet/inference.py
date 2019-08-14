@@ -9,6 +9,8 @@ from fcos_core.structures.bounding_box import BoxList
 from fcos_core.structures.boxlist_ops import cat_boxlist
 from fcos_core.structures.boxlist_ops import boxlist_nms
 from fcos_core.structures.boxlist_ops import remove_small_boxes
+from fcos_core.layers import nms as _box_nms
+from fcos_core.utils.softnms import box_softnms as softnms
 
 
 class RetinaNetPostProcessor(RPNPostProcessor):
@@ -16,6 +18,7 @@ class RetinaNetPostProcessor(RPNPostProcessor):
     Performs post-processing on the outputs of the RetinaNet boxes.
     This is only used in the testing.
     """
+
     def __init__(
         self,
         pre_nms_thresh,
@@ -25,6 +28,7 @@ class RetinaNetPostProcessor(RPNPostProcessor):
         min_size,
         num_classes,
         box_coder=None,
+        softnms=False,
     ):
         """
         Arguments:
@@ -47,17 +51,20 @@ class RetinaNetPostProcessor(RPNPostProcessor):
         self.num_classes = num_classes
 
         if box_coder is None:
-            box_coder = BoxCoder(weights=(10., 10., 5., 5.))
+            box_coder = BoxCoder(weights=(10.0, 10.0, 5.0, 5.0))
         self.box_coder = box_coder
- 
+        if softnms:
+            self.nms_func = softnms
+        else:
+            self.nms_func = _box_nms
+
     def add_gt_proposals(self, proposals, targets):
         """
         This function is not used in RetinaNet
         """
         pass
 
-    def forward_for_single_feature_map(
-            self, anchors, box_cls, box_regression):
+    def forward_for_single_feature_map(self, anchors, box_cls, box_regression):
         """
         Arguments:
             anchors: list[BoxList]
@@ -84,27 +91,31 @@ class RetinaNetPostProcessor(RPNPostProcessor):
         pre_nms_top_n = pre_nms_top_n.clamp(max=self.pre_nms_top_n)
 
         results = []
-        for per_box_cls, per_box_regression, per_pre_nms_top_n, \
-        per_candidate_inds, per_anchors in zip(
-            box_cls,
-            box_regression,
-            pre_nms_top_n,
-            candidate_inds,
-            anchors):
+        for (
+            per_box_cls,
+            per_box_regression,
+            per_pre_nms_top_n,
+            per_candidate_inds,
+            per_anchors,
+        ) in zip(
+            box_cls, box_regression, pre_nms_top_n, candidate_inds, anchors
+        ):
 
             # Sort and select TopN
             # TODO most of this can be made out of the loop for
-            # all images. 
+            # all images.
             # TODO:Yang: Not easy to do. Because the numbers of detections are
             # different in each image. Therefore, this part needs to be done
-            # per image. 
+            # per image.
             per_box_cls = per_box_cls[per_candidate_inds]
- 
-            per_box_cls, top_k_indices = \
-                    per_box_cls.topk(per_pre_nms_top_n, sorted=False)
 
-            per_candidate_nonzeros = \
-                    per_candidate_inds.nonzero()[top_k_indices, :]
+            per_box_cls, top_k_indices = per_box_cls.topk(
+                per_pre_nms_top_n, sorted=False
+            )
+
+            per_candidate_nonzeros = per_candidate_inds.nonzero()[
+                top_k_indices, :
+            ]
 
             per_box_loc = per_candidate_nonzeros[:, 0]
             per_class = per_candidate_nonzeros[:, 1]
@@ -112,7 +123,7 @@ class RetinaNetPostProcessor(RPNPostProcessor):
 
             detections = self.box_coder.decode(
                 per_box_regression[per_box_loc, :].view(-1, 4),
-                per_anchors.bbox[per_box_loc, :].view(-1, 4)
+                per_anchors.bbox[per_box_loc, :].view(-1, 4),
             )
 
             boxlist = BoxList(detections, per_anchors.size, mode="xyxy")
@@ -146,14 +157,20 @@ class RetinaNetPostProcessor(RPNPostProcessor):
                 boxlist_for_class = BoxList(boxes_j, boxlist.size, mode="xyxy")
                 boxlist_for_class.add_field("scores", scores_j)
                 boxlist_for_class = boxlist_nms(
-                    boxlist_for_class, self.nms_thresh,
-                    score_field="scores"
+                    boxlist_for_class,
+                    self.nms_thresh,
+                    score_field="scores",
+                    nms_func=self.nms_func,
                 )
                 num_labels = len(boxlist_for_class)
                 boxlist_for_class.add_field(
-                    "labels", torch.full((num_labels,), j,
-                                         dtype=torch.int64,
-                                         device=scores.device)
+                    "labels",
+                    torch.full(
+                        (num_labels,),
+                        j,
+                        dtype=torch.int64,
+                        device=scores.device,
+                    ),
                 )
                 result.append(boxlist_for_class)
 
@@ -165,7 +182,7 @@ class RetinaNetPostProcessor(RPNPostProcessor):
                 cls_scores = result.get_field("scores")
                 image_thresh, _ = torch.kthvalue(
                     cls_scores.cpu(),
-                    number_of_detections - self.fpn_post_nms_top_n + 1
+                    number_of_detections - self.fpn_post_nms_top_n + 1,
                 )
                 keep = cls_scores >= image_thresh.item()
                 keep = torch.nonzero(keep).squeeze(1)

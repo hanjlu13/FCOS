@@ -29,6 +29,7 @@ _C.MODEL.KEYPOINT_ON = False
 _C.MODEL.DEVICE = "cuda"
 _C.MODEL.META_ARCHITECTURE = "GeneralizedRCNN"
 _C.MODEL.CLS_AGNOSTIC_BBOX_REG = False
+_C.MODEL.SOFT_NMS = True
 
 # If the WEIGHT starts with a catalog://, like :R-50, the code will look for
 # the path in paths_catalog. Else, it will use it as the specified absolute
@@ -305,6 +306,10 @@ _C.MODEL.FCOS.PRE_NMS_TOP_N = 1000
 _C.MODEL.FCOS.LOSS_ALPHA = 0.25
 # Focal loss parameter: gamma
 _C.MODEL.FCOS.LOSS_GAMMA = 2.0
+_C.MODEL.FCOS.REG_LOSS_TYPE = "IOU"
+_C.MODEL.FCOS.IOU_LOSS_WEIGHT = (1.0,)
+_C.MODEL.FCOS.BIOU_BETA = 0.2
+_C.MODEL.FCOS.BIOU_EPS = 0.001
 
 # the number of convolutions used in the cls and bbox tower
 _C.MODEL.FCOS.NUM_CONVS = 4

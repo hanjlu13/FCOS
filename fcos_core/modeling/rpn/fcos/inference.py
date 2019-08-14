@@ -9,6 +9,8 @@ from fcos_core.structures.bounding_box import BoxList
 from fcos_core.structures.boxlist_ops import cat_boxlist
 from fcos_core.structures.boxlist_ops import boxlist_nms
 from fcos_core.structures.boxlist_ops import remove_small_boxes
+from fcos_core.layers import nms as _box_nms
+from fcos_core.utils.softnms import box_softnms as softnms
 
 
 class FCOSPostProcessor(torch.nn.Module):
@@ -16,6 +18,7 @@ class FCOSPostProcessor(torch.nn.Module):
     Performs post-processing on the outputs of the RetinaNet boxes.
     This is only used in the testing.
     """
+
     def __init__(
         self,
         pre_nms_thresh,
@@ -24,6 +27,7 @@ class FCOSPostProcessor(torch.nn.Module):
         fpn_post_nms_top_n,
         min_size,
         num_classes,
+        soft_nms,
     ):
         """
         Arguments:
@@ -42,11 +46,14 @@ class FCOSPostProcessor(torch.nn.Module):
         self.fpn_post_nms_top_n = fpn_post_nms_top_n
         self.min_size = min_size
         self.num_classes = num_classes
+        if soft_nms:
+            self.nms_func = softnms
+        else:
+            self.nms_func = _box_nms
 
     def forward_for_single_feature_map(
-            self, locations, box_cls,
-            box_regression, centerness,
-            image_sizes):
+        self, locations, box_cls, box_regression, centerness, image_sizes
+    ):
         """
         Arguments:
             anchors: list[BoxList]
@@ -87,18 +94,22 @@ class FCOSPostProcessor(torch.nn.Module):
             per_pre_nms_top_n = pre_nms_top_n[i]
 
             if per_candidate_inds.sum().item() > per_pre_nms_top_n.item():
-                per_box_cls, top_k_indices = \
-                    per_box_cls.topk(per_pre_nms_top_n, sorted=False)
+                per_box_cls, top_k_indices = per_box_cls.topk(
+                    per_pre_nms_top_n, sorted=False
+                )
                 per_class = per_class[top_k_indices]
                 per_box_regression = per_box_regression[top_k_indices]
                 per_locations = per_locations[top_k_indices]
 
-            detections = torch.stack([
-                per_locations[:, 0] - per_box_regression[:, 0],
-                per_locations[:, 1] - per_box_regression[:, 1],
-                per_locations[:, 0] + per_box_regression[:, 2],
-                per_locations[:, 1] + per_box_regression[:, 3],
-            ], dim=1)
+            detections = torch.stack(
+                [
+                    per_locations[:, 0] - per_box_regression[:, 0],
+                    per_locations[:, 1] - per_box_regression[:, 1],
+                    per_locations[:, 0] + per_box_regression[:, 2],
+                    per_locations[:, 1] + per_box_regression[:, 3],
+                ],
+                dim=1,
+            )
 
             h, w = image_sizes[i]
             boxlist = BoxList(detections, (int(w), int(h)), mode="xyxy")
@@ -110,7 +121,9 @@ class FCOSPostProcessor(torch.nn.Module):
 
         return results
 
-    def forward(self, locations, box_cls, box_regression, centerness, image_sizes):
+    def forward(
+        self, locations, box_cls, box_regression, centerness, image_sizes
+    ):
         """
         Arguments:
             anchors: list[list[BoxList]]
@@ -122,11 +135,11 @@ class FCOSPostProcessor(torch.nn.Module):
                 applying box decoding and NMS
         """
         sampled_boxes = []
-        for _, (l, o, b, c) in enumerate(zip(locations, box_cls, box_regression, centerness)):
+        for _, (l, o, b, c) in enumerate(
+            zip(locations, box_cls, box_regression, centerness)
+        ):
             sampled_boxes.append(
-                self.forward_for_single_feature_map(
-                    l, o, b, c, image_sizes
-                )
+                self.forward_for_single_feature_map(l, o, b, c, image_sizes)
             )
 
         boxlists = list(zip(*sampled_boxes))
@@ -157,14 +170,20 @@ class FCOSPostProcessor(torch.nn.Module):
                 boxlist_for_class = BoxList(boxes_j, boxlist.size, mode="xyxy")
                 boxlist_for_class.add_field("scores", scores_j)
                 boxlist_for_class = boxlist_nms(
-                    boxlist_for_class, self.nms_thresh,
-                    score_field="scores"
+                    boxlist_for_class,
+                    self.nms_thresh,
+                    score_field="scores",
+                    nms_func=self.nms_func,
                 )
                 num_labels = len(boxlist_for_class)
                 boxlist_for_class.add_field(
-                    "labels", torch.full((num_labels,), j,
-                                         dtype=torch.int64,
-                                         device=scores.device)
+                    "labels",
+                    torch.full(
+                        (num_labels,),
+                        j,
+                        dtype=torch.int64,
+                        device=scores.device,
+                    ),
                 )
                 result.append(boxlist_for_class)
 
@@ -176,7 +195,7 @@ class FCOSPostProcessor(torch.nn.Module):
                 cls_scores = result.get_field("scores")
                 image_thresh, _ = torch.kthvalue(
                     cls_scores.cpu(),
-                    number_of_detections - self.fpn_post_nms_top_n + 1
+                    number_of_detections - self.fpn_post_nms_top_n + 1,
                 )
                 keep = cls_scores >= image_thresh.item()
                 keep = torch.nonzero(keep).squeeze(1)
@@ -197,7 +216,8 @@ def make_fcos_postprocessor(config):
         nms_thresh=nms_thresh,
         fpn_post_nms_top_n=fpn_post_nms_top_n,
         min_size=0,
-        num_classes=config.MODEL.FCOS.NUM_CLASSES
+        num_classes=config.MODEL.FCOS.NUM_CLASSES,
+        soft_nms=config.MODEL.SOFT_NMS,
     )
 
     return box_selector

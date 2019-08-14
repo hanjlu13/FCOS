@@ -6,9 +6,12 @@ from fcos_core.structures.bounding_box import BoxList
 from fcos_core.structures.boxlist_ops import cat_boxlist
 from fcos_core.structures.boxlist_ops import boxlist_nms
 from fcos_core.structures.boxlist_ops import remove_small_boxes
+from fcos_core.layers import nms as _box_nms
+from fcos_core.utils.softnms import box_softnms as softnms
 
 from ..utils import cat
 from .utils import permute_and_flatten
+
 
 class RPNPostProcessor(torch.nn.Module):
     """
@@ -24,6 +27,7 @@ class RPNPostProcessor(torch.nn.Module):
         min_size,
         box_coder=None,
         fpn_post_nms_top_n=None,
+        softnms=False,
     ):
         """
         Arguments:
@@ -47,6 +51,10 @@ class RPNPostProcessor(torch.nn.Module):
         if fpn_post_nms_top_n is None:
             fpn_post_nms_top_n = post_nms_top_n
         self.fpn_post_nms_top_n = fpn_post_nms_top_n
+        if softnms:
+            self.nms_func = softnms
+        else:
+            self.nms_func = _box_nms
 
     def add_gt_proposals(self, proposals, targets):
         """
@@ -62,7 +70,9 @@ class RPNPostProcessor(torch.nn.Module):
         # later cat of bbox requires all fields to be present for all bbox
         # so we need to add a dummy for objectness that's missing
         for gt_box in gt_boxes:
-            gt_box.add_field("objectness", torch.ones(len(gt_box), device=device))
+            gt_box.add_field(
+                "objectness", torch.ones(len(gt_box), device=device)
+            )
 
         proposals = [
             cat_boxlist((proposal, gt_box))
@@ -71,7 +81,9 @@ class RPNPostProcessor(torch.nn.Module):
 
         return proposals
 
-    def forward_for_single_feature_map(self, anchors, objectness, box_regression):
+    def forward_for_single_feature_map(
+        self, anchors, objectness, box_regression
+    ):
         """
         Arguments:
             anchors: list[BoxList]
@@ -90,7 +102,9 @@ class RPNPostProcessor(torch.nn.Module):
         num_anchors = A * H * W
 
         pre_nms_top_n = min(self.pre_nms_top_n, num_anchors)
-        objectness, topk_idx = objectness.topk(pre_nms_top_n, dim=1, sorted=True)
+        objectness, topk_idx = objectness.topk(
+            pre_nms_top_n, dim=1, sorted=True
+        )
 
         batch_idx = torch.arange(N, device=device)[:, None]
         box_regression = box_regression[batch_idx, topk_idx]
@@ -106,7 +120,9 @@ class RPNPostProcessor(torch.nn.Module):
         proposals = proposals.view(N, -1, 4)
 
         result = []
-        for proposal, score, im_shape in zip(proposals, objectness, image_shapes):
+        for proposal, score, im_shape in zip(
+            proposals, objectness, image_shapes
+        ):
             boxlist = BoxList(proposal, im_shape, mode="xyxy")
             boxlist.add_field("objectness", score)
             boxlist = boxlist.clip_to_image(remove_empty=False)
@@ -116,6 +132,7 @@ class RPNPostProcessor(torch.nn.Module):
                 self.nms_thresh,
                 max_proposals=self.post_nms_top_n,
                 score_field="objectness",
+                nms_func=self.nms_func,
             )
             result.append(boxlist)
         return result
@@ -162,7 +179,9 @@ class RPNPostProcessor(torch.nn.Module):
             )
             box_sizes = [len(boxlist) for boxlist in boxlists]
             post_nms_top_n = min(self.fpn_post_nms_top_n, len(objectness))
-            _, inds_sorted = torch.topk(objectness, post_nms_top_n, dim=0, sorted=True)
+            _, inds_sorted = torch.topk(
+                objectness, post_nms_top_n, dim=0, sorted=True
+            )
             inds_mask = torch.zeros_like(objectness, dtype=torch.uint8)
             inds_mask[inds_sorted] = 1
             inds_mask = inds_mask.split(box_sizes)

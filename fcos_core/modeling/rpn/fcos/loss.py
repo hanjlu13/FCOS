@@ -8,7 +8,7 @@ from torch.nn import functional as F
 from torch import nn
 
 from ..utils import concat_box_prediction_layers
-from fcos_core.layers import IOULoss
+from fcos_core.layers import make_iou_loss, Bounded_IOULoss, IOULoss, GIOULoss
 from fcos_core.layers import SigmoidFocalLoss
 from fcos_core.modeling.matcher import Matcher
 from fcos_core.modeling.utils import cat
@@ -24,14 +24,14 @@ class FCOSLossComputation(object):
     This class computes the FCOS losses.
     """
 
-    def __init__(self, cfg):
-        self.cls_loss_func = SigmoidFocalLoss(
-            cfg.MODEL.FCOS.LOSS_GAMMA,
-            cfg.MODEL.FCOS.LOSS_ALPHA
-        )
+    def __init__(
+        self, loss_gamma, loss_alpha, box_reg_loss_func, box_reg_loss_func_extra_args
+    ):
+        self.cls_loss_func = SigmoidFocalLoss(loss_gamma, loss_alpha)
         # we make use of IOU Loss for bounding boxes regression,
         # but we found that L1 in log scale can yield a similar performance
-        self.box_reg_loss_func = IOULoss()
+        self.box_reg_loss_func = box_reg_loss_func
+        self.box_reg_loss_func_extra_args = box_reg_loss_func_extra_args
         self.centerness_loss_func = nn.BCEWithLogitsLoss()
 
     def prepare_targets(self, points, targets):
@@ -44,13 +44,18 @@ class FCOSLossComputation(object):
         ]
         expanded_object_sizes_of_interest = []
         for l, points_per_level in enumerate(points):
-            object_sizes_of_interest_per_level = \
-                points_per_level.new_tensor(object_sizes_of_interest[l])
+            object_sizes_of_interest_per_level = points_per_level.new_tensor(
+                object_sizes_of_interest[l]
+            )
             expanded_object_sizes_of_interest.append(
-                object_sizes_of_interest_per_level[None].expand(len(points_per_level), -1)
+                object_sizes_of_interest_per_level[None].expand(
+                    len(points_per_level), -1
+                )
             )
 
-        expanded_object_sizes_of_interest = torch.cat(expanded_object_sizes_of_interest, dim=0)
+        expanded_object_sizes_of_interest = torch.cat(
+            expanded_object_sizes_of_interest, dim=0
+        )
         num_points_per_level = [len(points_per_level) for points_per_level in points]
         points_all_level = torch.cat(points, dim=0)
         labels, reg_targets = self.compute_targets_for_locations(
@@ -68,12 +73,17 @@ class FCOSLossComputation(object):
                 torch.cat([labels_per_im[level] for labels_per_im in labels], dim=0)
             )
             reg_targets_level_first.append(
-                torch.cat([reg_targets_per_im[level] for reg_targets_per_im in reg_targets], dim=0)
+                torch.cat(
+                    [reg_targets_per_im[level] for reg_targets_per_im in reg_targets],
+                    dim=0,
+                )
             )
 
         return labels_level_first, reg_targets_level_first
 
-    def compute_targets_for_locations(self, locations, targets, object_sizes_of_interest):
+    def compute_targets_for_locations(
+        self, locations, targets, object_sizes_of_interest
+    ):
         labels = []
         reg_targets = []
         xs, ys = locations[:, 0], locations[:, 1]
@@ -95,9 +105,9 @@ class FCOSLossComputation(object):
 
             max_reg_targets_per_im = reg_targets_per_im.max(dim=2)[0]
             # limit the regression range for each location
-            is_cared_in_the_level = \
-                (max_reg_targets_per_im >= object_sizes_of_interest[:, [0]]) & \
-                (max_reg_targets_per_im <= object_sizes_of_interest[:, [1]])
+            is_cared_in_the_level = (
+                max_reg_targets_per_im >= object_sizes_of_interest[:, [0]]
+            ) & (max_reg_targets_per_im <= object_sizes_of_interest[:, [1]])
 
             locations_to_gt_area = area[None].repeat(len(locations), 1)
             locations_to_gt_area[is_in_boxes == 0] = INF
@@ -105,9 +115,13 @@ class FCOSLossComputation(object):
 
             # if there are still more than one objects for a location,
             # we choose the one with minimal area
-            locations_to_min_area, locations_to_gt_inds = locations_to_gt_area.min(dim=1)
+            locations_to_min_area, locations_to_gt_inds = locations_to_gt_area.min(
+                dim=1
+            )
 
-            reg_targets_per_im = reg_targets_per_im[range(len(locations)), locations_to_gt_inds]
+            reg_targets_per_im = reg_targets_per_im[
+                range(len(locations)), locations_to_gt_inds
+            ]
             labels_per_im = labels_per_im[locations_to_gt_inds]
             labels_per_im[locations_to_min_area == INF] = 0
 
@@ -119,8 +133,9 @@ class FCOSLossComputation(object):
     def compute_centerness_targets(self, reg_targets):
         left_right = reg_targets[:, [0, 2]]
         top_bottom = reg_targets[:, [1, 3]]
-        centerness = (left_right.min(dim=-1)[0] / left_right.max(dim=-1)[0]) * \
-                      (top_bottom.min(dim=-1)[0] / top_bottom.max(dim=-1)[0])
+        centerness = (left_right.min(dim=-1)[0] / left_right.max(dim=-1)[0]) * (
+            top_bottom.min(dim=-1)[0] / top_bottom.max(dim=-1)[0]
+        )
         return torch.sqrt(centerness)
 
     def __call__(self, locations, box_cls, box_regression, centerness, targets):
@@ -147,8 +162,12 @@ class FCOSLossComputation(object):
         labels_flatten = []
         reg_targets_flatten = []
         for l in range(len(labels)):
-            box_cls_flatten.append(box_cls[l].permute(0, 2, 3, 1).reshape(-1, num_classes))
-            box_regression_flatten.append(box_regression[l].permute(0, 2, 3, 1).reshape(-1, 4))
+            box_cls_flatten.append(
+                box_cls[l].permute(0, 2, 3, 1).reshape(-1, num_classes)
+            )
+            box_regression_flatten.append(
+                box_regression[l].permute(0, 2, 3, 1).reshape(-1, 4)
+            )
             labels_flatten.append(labels[l].reshape(-1))
             reg_targets_flatten.append(reg_targets[l].reshape(-1, 4))
             centerness_flatten.append(centerness[l].reshape(-1))
@@ -160,10 +179,9 @@ class FCOSLossComputation(object):
         reg_targets_flatten = torch.cat(reg_targets_flatten, dim=0)
 
         pos_inds = torch.nonzero(labels_flatten > 0).squeeze(1)
-        cls_loss = self.cls_loss_func(
-            box_cls_flatten,
-            labels_flatten.int()
-        ) / (pos_inds.numel() + N)  # add N to avoid dividing by a zero
+        cls_loss = self.cls_loss_func(box_cls_flatten, labels_flatten.int()) / (
+            pos_inds.numel() + N
+        )  # add N to avoid dividing by a zero
 
         box_regression_flatten = box_regression_flatten[pos_inds]
         reg_targets_flatten = reg_targets_flatten[pos_inds]
@@ -171,14 +189,17 @@ class FCOSLossComputation(object):
 
         if pos_inds.numel() > 0:
             centerness_targets = self.compute_centerness_targets(reg_targets_flatten)
+            # if isinstance(self.box_reg_loss_func, IOULoss) or isinstance(
+            # self.box_reg_loss_func, GIOULoss
+            # ):
+            self.box_reg_loss_func_extra_args.update(weight=centerness_targets)
             reg_loss = self.box_reg_loss_func(
                 box_regression_flatten,
                 reg_targets_flatten,
-                centerness_targets
+                **self.box_reg_loss_func_extra_args,
             )
             centerness_loss = self.centerness_loss_func(
-                centerness_flatten,
-                centerness_targets
+                centerness_flatten, centerness_targets
             )
         else:
             reg_loss = box_regression_flatten.sum()
@@ -188,5 +209,12 @@ class FCOSLossComputation(object):
 
 
 def make_fcos_loss_evaluator(cfg):
-    loss_evaluator = FCOSLossComputation(cfg)
+    loss_gamma = cfg.MODEL.FCOS.LOSS_GAMMA
+    loss_alpha = cfg.MODEL.FCOS.LOSS_ALPHA
+    box_reg_loss, box_loss_extra_args = make_iou_loss(cfg)
+    box_reg_loss_func_type = cfg.MODEL.FCOS.REG_LOSS_TYPE
+
+    loss_evaluator = FCOSLossComputation(
+        loss_gamma, loss_alpha, box_reg_loss, box_loss_extra_args
+    )
     return loss_evaluator

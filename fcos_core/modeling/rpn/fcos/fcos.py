@@ -6,7 +6,7 @@ from torch import nn
 from .inference import make_fcos_postprocessor
 from .loss import make_fcos_loss_evaluator
 
-from fcos_core.layers import Scale
+from fcos_core.layers import Scale, ConvInHead
 
 
 class FCOSHead(torch.nn.Module):
@@ -21,32 +21,61 @@ class FCOSHead(torch.nn.Module):
 
         cls_tower = []
         bbox_tower = []
+        self.light_head = cfg.MODEL.FCOS.LIGHT_HEAD
         for i in range(cfg.MODEL.FCOS.NUM_CONVS):
-            cls_tower.append(
-                nn.Conv2d(
-                    in_channels, in_channels, kernel_size=3, stride=1, padding=1
-                )
+            cls_tower += ConvInHead(
+                in_channels,
+                in_channels,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                is_lite=self.light_head,
             )
-            cls_tower.append(nn.GroupNorm(32, in_channels))
-            cls_tower.append(nn.ReLU())
-            bbox_tower.append(
-                nn.Conv2d(
-                    in_channels, in_channels, kernel_size=3, stride=1, padding=1
-                )
+            cls_tower += [nn.GroupNorm(32, in_channels)]
+            cls_tower += [nn.ReLU()]
+
+            bbox_tower += ConvInHead(
+                in_channels,
+                in_channels,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                is_lite=self.light_head,
             )
-            bbox_tower.append(nn.GroupNorm(32, in_channels))
-            bbox_tower.append(nn.ReLU())
+            bbox_tower += [nn.GroupNorm(32, in_channels)]
+            bbox_tower += [nn.ReLU()]
 
         self.add_module("cls_tower", nn.Sequential(*cls_tower))
         self.add_module("bbox_tower", nn.Sequential(*bbox_tower))
-        self.cls_logits = nn.Conv2d(
-            in_channels, num_classes, kernel_size=3, stride=1, padding=1
+        self.cls_logits = nn.Sequential(
+            *ConvInHead(
+                in_channels,
+                num_classes,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                is_lite=self.light_head,
+            )
         )
-        self.bbox_pred = nn.Conv2d(
-            in_channels, 4, kernel_size=3, stride=1, padding=1
+        self.bbox_pred = nn.Sequential(
+            *ConvInHead(
+                in_channels,
+                4,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                is_lite=self.light_head,
+            )
         )
-        self.centerness = nn.Conv2d(
-            in_channels, 1, kernel_size=3, stride=1, padding=1
+        self.centerness = nn.Sequential(
+            *ConvInHead(
+                in_channels,
+                1,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                is_lite=self.light_head,
+            )
         )
 
         # initialization
@@ -65,7 +94,9 @@ class FCOSHead(torch.nn.Module):
         # initialize the bias for focal loss
         prior_prob = cfg.MODEL.FCOS.PRIOR_PROB
         bias_value = -math.log((1 - prior_prob) / prior_prob)
-        torch.nn.init.constant_(self.cls_logits.bias, bias_value)
+        for l in self.cls_logits.modules():
+            if isinstance(l, nn.Conv2d):
+                torch.nn.init.constant_(l.bias, bias_value)
 
         self.scales = nn.ModuleList([Scale(init_value=1.0) for _ in range(5)])
 

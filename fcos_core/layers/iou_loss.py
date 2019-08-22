@@ -73,20 +73,22 @@ class GIOULoss(nn.Module):
         areaC_bottom = torch.max(pred_bottom, target_bottom)
 
         # calc area of C
-        areaC = (areaC_left + areaC_right) * (areaC_top + areaC_bottom)
+        areaC = (areaC_left + areaC_right) * (areaC_top + areaC_bottom) + 1e-7
 
         # calc IOU
+        iou = (area_intersect + 1.0) / (area_union + 1.0)
 
         # cal GIOU
-        iou = (area_intersect + 1.0) / (area_union + 1.0)
-        giou = iou - (areaC - area_union + 1.0) / (areaC + 1.0)
+        giou = iou - (areaC - area_union) / (areaC)
 
         loss_giou = 1.0 - giou
 
-        if weight is not None and weight.sum() > 0:
-            return torch.matmul(weight, loss_giou).sum() / weight.sum()
-        else:
-            return loss_giou.mean()
+        return loss_giou.mean()
+
+        # if weight is not None and weight.sum() > 0:
+        #     return torch.matmul(weight, loss_giou).sum() / weight.sum()
+        # else:
+        #     return loss_giou.mean()
 
 
 # bounded IOU Loss adapted from mmdection

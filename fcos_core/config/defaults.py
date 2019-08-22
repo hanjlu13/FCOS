@@ -313,6 +313,8 @@ _C.MODEL.FCOS.BIOU_EPS = 0.001
 
 # the number of convolutions used in the cls and bbox tower
 _C.MODEL.FCOS.NUM_CONVS = 4
+# whether the head is light
+_C.MODEL.FCOS.LIGHT_HEAD = False
 
 # ---------------------------------------------------------------------------- #
 # RetinaNet Options (Follow the Detectron version)

@@ -4,6 +4,7 @@ import random
 import torch
 import torchvision
 from torchvision.transforms import functional as F
+from torchvision.transforms import ColorJitter
 
 
 class Compose(object):
@@ -40,7 +41,9 @@ class Resize(object):
             min_original_size = float(min((w, h)))
             max_original_size = float(max((w, h)))
             if max_original_size / min_original_size * size > max_size:
-                size = int(round(max_size * min_original_size / max_original_size))
+                size = int(
+                    round(max_size * min_original_size / max_original_size)
+                )
 
         if (w <= h and w == size) or (h <= w and h == size):
             return (h, w)
@@ -69,6 +72,15 @@ class RandomHorizontalFlip(object):
         if random.random() < self.prob:
             image = F.hflip(image)
             target = target.transpose(0)
+        return image, target
+
+
+class RandomJitter(object):
+    def __init__(self):
+        self.jitter_func = ColorJitter()
+
+    def __call__(self, image, target):
+        image = self.jitter_func(image)
         return image, target
 
 

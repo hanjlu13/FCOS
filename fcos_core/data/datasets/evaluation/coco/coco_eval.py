@@ -351,7 +351,7 @@ def evaluate_predictions_on_coco(
     coco_eval.accumulate()
     coco_eval.summarize()
 
-    # compute_thresholds_for_classes(coco_eval)
+    compute_thresholds_for_classes(coco_eval)
     ap_stats["mAP"] = coco_eval.stats[1]
 
     # each catgory aps
@@ -393,12 +393,12 @@ def compute_thresholds_for_classes(coco_eval):
     max_f_measure_inds = f_measure.argmax(axis=0)
     scores = scores[max_f_measure_inds, range(len(max_f_measure_inds))]
 
-    # print("Maximum f-measures for classes:")
-    # print(list(max_f_measure))
-    # print(
-    #     "Score thresholds for classes (used in demos for visualization purposes):"
-    # )
-    # print(list(scores))
+    print("Maximum f-measures for classes:")
+    print(list(max_f_measure))
+    print(
+        "Score thresholds for classes (used in demos for visualization purposes):"
+    )
+    print(list(scores))
 
 
 class COCOResults(object):

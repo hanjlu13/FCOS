@@ -15,6 +15,7 @@ from .smooth_l1_loss import smooth_l1_loss
 from .sigmoid_focal_loss import SigmoidFocalLoss
 from .iou_loss import IOULoss, Bounded_IOULoss, make_iou_loss, GIOULoss
 from .scale import Scale
+from .conv_in_head import ConvInHead
 
 
 __all__ = [
@@ -35,5 +36,6 @@ __all__ = [
     "Bounded_IOULoss",
     "make_iou_loss",
     "GIOULoss",
+    "ConvInHead",
 ]
 

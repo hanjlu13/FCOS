@@ -145,7 +145,8 @@ def main():
     #     0.4143834114074707,
     # ]
 
-    thresholds_for_classes = [0.4792782962322235, 0.6170117855072021]
+    # thresholds_for_classes = [0.4792782962322235, 0.6170117855072021]
+    thresholds_for_classes = [0.4, 0.3]
     demo_im_names = os.listdir(args.images_dir)
     if args.output_dir:
         os.makedirs(args.output_dir, exist_ok=True)

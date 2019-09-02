@@ -172,12 +172,12 @@ class COCODemo(object):
                 the BoxList via `prediction.fields()`
         """
         predictions = self.compute_prediction(image)
-        top_predictions = self.select_top_predictions(predictions)
+        top_predictions, top_scores = self.select_top_predictions(predictions)
 
         result = image.copy()
         if self.show_mask_heatmaps:
             return self.create_mask_montage(result, top_predictions)
-        result = self.overlay_boxes(result, top_predictions)
+        result = self.overlay_boxes(result, top_predictions, top_scores)
         if self.cfg.MODEL.MASK_ON:
             result = self.overlay_mask(result, top_predictions)
         if self.cfg.MODEL.KEYPOINT_ON:
@@ -244,7 +244,7 @@ class COCODemo(object):
         predictions = predictions[keep]
         scores = predictions.get_field("scores")
         _, idx = scores.sort(0, descending=True)
-        return predictions[idx]
+        return predictions[idx], scores[idx]
 
     def compute_colors_for_labels(self, labels):
         """
@@ -254,7 +254,7 @@ class COCODemo(object):
         colors = (colors % 255).numpy().astype("uint8")
         return colors
 
-    def overlay_boxes(self, image, predictions):
+    def overlay_boxes(self, image, predictions, scores):
         """
         Adds the predicted boxes on top of the image
 
@@ -268,11 +268,21 @@ class COCODemo(object):
 
         colors = self.compute_colors_for_labels(labels).tolist()
 
-        for box, color in zip(boxes, colors):
+        for score, box, color in zip(scores, boxes, colors):
             box = box.to(torch.int64)
             top_left, bottom_right = box[:2].tolist(), box[2:].tolist()
-            image = cv2.rectangle(
+            cv2.rectangle(
                 image, tuple(top_left), tuple(bottom_right), tuple(color), 2
+            )
+            cv2.putText(
+                image,
+                "{:.2f}".format(score.data.cpu().numpy()),
+                tuple(map(lambda x: x + 5, top_left)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 0, 0),
+                1,
+                cv2.LINE_AA,
             )
 
         return image

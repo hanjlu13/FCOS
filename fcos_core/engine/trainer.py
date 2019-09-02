@@ -18,6 +18,7 @@ from fcos_core.utils.metric_logger import MetricLogger
 from fcos_core.utils.tf_logger import TensorboardWriter
 from .val import eval_model
 from .inference import _accumulate_predictions_from_multiple_gpus
+from fcos_core.solver.lookahead import Lookahead
 
 
 def reduce_loss_dict(loss_dict):
@@ -57,6 +58,7 @@ def do_train(
     checkpoint_period,
     val_period,
     arguments,
+    use_lookahead=False,
 ):
     logger = logging.getLogger("fcos_core.trainer")
     logger.info("Start training")
@@ -67,6 +69,8 @@ def do_train(
     start_training_time = time.time()
     end = time.time()
     pytorch_1_1_0_or_later = is_pytorch_1_1_0_or_later()
+    if use_lookahead:
+        lookahead = Lookahead(optimizer, k=5, alpha=0.5)
     for iteration, (images, targets, _) in enumerate(train_loader, start_iter):
         data_time = time.time() - end
         iteration = iteration + 1
@@ -90,7 +94,10 @@ def do_train(
 
         optimizer.zero_grad()
         losses.backward()
-        optimizer.step()
+        if use_lookahead:
+            lookahead.step()
+        else:
+            optimizer.step()
 
         if pytorch_1_1_0_or_later:
             scheduler.step()

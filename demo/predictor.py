@@ -9,6 +9,7 @@ from fcos_core.structures.image_list import to_image_list
 from fcos_core.modeling.roi_heads.mask_head.inference import Masker
 from fcos_core import layers as L
 from fcos_core.utils import cv2_util
+from cv2_vis_utils import Cv2OverlayUtils
 
 
 class COCODemo(object):
@@ -265,6 +266,8 @@ class COCODemo(object):
         """
         labels = predictions.get_field("labels")
         boxes = predictions.bbox
+        label_list = labels.data.cpu().numpy().tolist()
+        woods_sum = label_list.count(1)
 
         colors = self.compute_colors_for_labels(labels).tolist()
 
@@ -284,7 +287,9 @@ class COCODemo(object):
                 1,
                 cv2.LINE_AA,
             )
-
+        image = Cv2OverlayUtils.overlay_text(
+            image, "Woods NUM:{}".format(woods_sum), (30, 30)
+        )
         return image
 
     def overlay_mask(self, image, predictions):

@@ -6,7 +6,7 @@ file
 import torch
 from torch.nn import functional as F
 from torch import nn
-
+import os
 from ..utils import concat_box_prediction_layers
 from fcos_core.layers import IOULoss
 from fcos_core.layers import SigmoidFocalLoss
@@ -19,6 +19,17 @@ from fcos_core.structures.boxlist_ops import cat_boxlist
 INF = 100000000
 
 
+def get_num_gpus():
+    return int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
+
+
+def reduce_sum(tensor):
+    import torch.distributed as dist
+    tensor = tensor.clone()
+    dist.all_reduce(tensor, op=dist.reduce_op.SUM)
+    return tensor
+
+
 class FCOSLossComputation(object):
     """
     This class computes the FCOS losses.
@@ -29,10 +40,62 @@ class FCOSLossComputation(object):
             cfg.MODEL.FCOS.LOSS_GAMMA,
             cfg.MODEL.FCOS.LOSS_ALPHA
         )
+        self.fpn_strides = cfg.MODEL.FCOS.FPN_STRIDES
+        self.center_sampling_radius = cfg.MODEL.FCOS.CENTER_SAMPLING_RADIUS
+        self.iou_loss_type = cfg.MODEL.FCOS.IOU_LOSS_TYPE
+        self.norm_reg_targets = cfg.MODEL.FCOS.NORM_REG_TARGETS
+
         # we make use of IOU Loss for bounding boxes regression,
         # but we found that L1 in log scale can yield a similar performance
-        self.box_reg_loss_func = IOULoss()
-        self.centerness_loss_func = nn.BCEWithLogitsLoss()
+        self.box_reg_loss_func = IOULoss(self.iou_loss_type)
+        self.centerness_loss_func = nn.BCEWithLogitsLoss(reduction="sum")
+
+    def get_sample_region(self, gt, strides, num_points_per, gt_xs, gt_ys, radius=1.0):
+        '''
+        This code is from
+        https://github.com/yqyao/FCOS_PLUS/blob/0d20ba34ccc316650d8c30febb2eb40cb6eaae37/
+        maskrcnn_benchmark/modeling/rpn/fcos/loss.py#L42
+        '''
+        num_gts = gt.shape[0]
+        K = len(gt_xs)
+        gt = gt[None].expand(K, num_gts, 4)
+        center_x = (gt[..., 0] + gt[..., 2]) / 2
+        center_y = (gt[..., 1] + gt[..., 3]) / 2
+        center_gt = gt.new_zeros(gt.shape)
+        # no gt
+        if center_x[..., 0].sum() == 0:
+            return gt_xs.new_zeros(gt_xs.shape, dtype=torch.uint8)
+        beg = 0
+        for level, n_p in enumerate(num_points_per):
+            end = beg + n_p
+            stride = strides[level] * radius
+            xmin = center_x[beg:end] - stride
+            ymin = center_y[beg:end] - stride
+            xmax = center_x[beg:end] + stride
+            ymax = center_y[beg:end] + stride
+            # limit sample region in gt
+            center_gt[beg:end, :, 0] = torch.where(
+                xmin > gt[beg:end, :, 0], xmin, gt[beg:end, :, 0]
+            )
+            center_gt[beg:end, :, 1] = torch.where(
+                ymin > gt[beg:end, :, 1], ymin, gt[beg:end, :, 1]
+            )
+            center_gt[beg:end, :, 2] = torch.where(
+                xmax > gt[beg:end, :, 2],
+                gt[beg:end, :, 2], xmax
+            )
+            center_gt[beg:end, :, 3] = torch.where(
+                ymax > gt[beg:end, :, 3],
+                gt[beg:end, :, 3], ymax
+            )
+            beg = end
+        left = gt_xs[:, None] - center_gt[..., 0]
+        right = center_gt[..., 2] - gt_xs[:, None]
+        top = gt_ys[:, None] - center_gt[..., 1]
+        bottom = center_gt[..., 3] - gt_ys[:, None]
+        center_bbox = torch.stack((left, top, right, bottom), -1)
+        inside_gt_bbox_mask = center_bbox.min(-1)[0] > 0
+        return inside_gt_bbox_mask
 
     def prepare_targets(self, points, targets):
         object_sizes_of_interest = [
@@ -52,6 +115,7 @@ class FCOSLossComputation(object):
 
         expanded_object_sizes_of_interest = torch.cat(expanded_object_sizes_of_interest, dim=0)
         num_points_per_level = [len(points_per_level) for points_per_level in points]
+        self.num_points_per_level = num_points_per_level
         points_all_level = torch.cat(points, dim=0)
         labels, reg_targets = self.compute_targets_for_locations(
             points_all_level, targets, expanded_object_sizes_of_interest
@@ -67,9 +131,15 @@ class FCOSLossComputation(object):
             labels_level_first.append(
                 torch.cat([labels_per_im[level] for labels_per_im in labels], dim=0)
             )
-            reg_targets_level_first.append(
-                torch.cat([reg_targets_per_im[level] for reg_targets_per_im in reg_targets], dim=0)
-            )
+
+            reg_targets_per_level = torch.cat([
+                reg_targets_per_im[level]
+                for reg_targets_per_im in reg_targets
+            ], dim=0)
+
+            if self.norm_reg_targets:
+                reg_targets_per_level = reg_targets_per_level / self.fpn_strides[level]
+            reg_targets_level_first.append(reg_targets_per_level)
 
         return labels_level_first, reg_targets_level_first
 
@@ -91,7 +161,17 @@ class FCOSLossComputation(object):
             b = bboxes[:, 3][None] - ys[:, None]
             reg_targets_per_im = torch.stack([l, t, r, b], dim=2)
 
-            is_in_boxes = reg_targets_per_im.min(dim=2)[0] > 0
+            if self.center_sampling_radius > 0:
+                is_in_boxes = self.get_sample_region(
+                    bboxes,
+                    self.fpn_strides,
+                    self.num_points_per_level,
+                    xs, ys,
+                    radius=self.center_sampling_radius
+                )
+            else:
+                # no center sampling, it will use all the locations within a ground-truth box
+                is_in_boxes = reg_targets_per_im.min(dim=2)[0] > 0
 
             max_reg_targets_per_im = reg_targets_per_im.max(dim=2)[0]
             # limit the regression range for each location
@@ -160,28 +240,46 @@ class FCOSLossComputation(object):
         reg_targets_flatten = torch.cat(reg_targets_flatten, dim=0)
 
         pos_inds = torch.nonzero(labels_flatten > 0).squeeze(1)
-        cls_loss = self.cls_loss_func(
-            box_cls_flatten,
-            labels_flatten.int()
-        ) / (pos_inds.numel() + N)  # add N to avoid dividing by a zero
 
         box_regression_flatten = box_regression_flatten[pos_inds]
         reg_targets_flatten = reg_targets_flatten[pos_inds]
         centerness_flatten = centerness_flatten[pos_inds]
 
+        num_pos_per_gpu = pos_inds.numel()
+        num_gpus = get_num_gpus()
+        if num_gpus > 1:
+            # sync num_pos from all gpus
+            total_num_pos = reduce_sum(pos_inds.new_tensor([num_pos_per_gpu])).item()
+        else:
+            total_num_pos = num_pos_per_gpu
+
+        cls_loss = self.cls_loss_func(
+            box_cls_flatten,
+            labels_flatten.int()
+        ) / max(total_num_pos / float(num_gpus), 1.0)
+
         if pos_inds.numel() > 0:
             centerness_targets = self.compute_centerness_targets(reg_targets_flatten)
+
+            sum_centerness_targets = centerness_targets.sum()
+            if num_gpus > 1:
+                # sync sum_centerness_targets from all gpus
+                sum_centerness_targets = reduce_sum(sum_centerness_targets).item()
+            else:
+                sum_centerness_targets = sum_centerness_targets.item()
+
             reg_loss = self.box_reg_loss_func(
                 box_regression_flatten,
                 reg_targets_flatten,
                 centerness_targets
-            )
+            ) / (sum_centerness_targets / float(num_gpus))
             centerness_loss = self.centerness_loss_func(
                 centerness_flatten,
                 centerness_targets
-            )
+            ) / max(total_num_pos / float(num_gpus), 1.0)
         else:
             reg_loss = box_regression_flatten.sum()
+            reduce_sum(centerness_flatten.new_tensor([0.0]))
             centerness_loss = centerness_flatten.sum()
 
         return cls_loss, reg_loss, centerness_loss

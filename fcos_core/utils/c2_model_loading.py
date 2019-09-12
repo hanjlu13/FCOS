@@ -119,6 +119,8 @@ def _rename_weights_for_resnet(weights, stage_names):
         v = weights[k]
         if "_momentum" in k:
             continue
+        if 'weight_order' in k:
+            continue
         # if 'fc1000' in k:
         #     continue
         w = torch.from_numpy(v)
@@ -141,6 +143,33 @@ def _load_c2_pickled_weights(file_path):
     else:
         weights = data
     return weights
+
+
+def _rename_conv_weights_for_deformable_conv_layers(state_dict, cfg):
+    import re
+    logger = logging.getLogger(__name__)
+    logger.info("Remapping conv weights for deformable conv weights")
+    layer_keys = sorted(state_dict.keys())
+    for ix, stage_with_dcn in enumerate(cfg.MODEL.RESNETS.STAGE_WITH_DCN, 1):
+        if not stage_with_dcn:
+            continue
+        for old_key in layer_keys:
+            pattern = ".*layer{}.*conv2.*".format(ix)
+            r = re.match(pattern, old_key)
+            if r is None:
+                continue
+            for param in ["weight", "bias"]:
+                if old_key.find(param) is -1:
+                    continue
+                new_key = old_key.replace(
+                    "conv2.{}".format(param), "conv2.conv.{}".format(param)
+                )
+                logger.info("pattern: {}, old_key: {}, new_key: {}".format(
+                    pattern, old_key, new_key
+                ))
+                state_dict[new_key] = state_dict[old_key]
+                del state_dict[old_key]
+    return state_dict
 
 
 _C2_STAGE_NAMES = {
@@ -168,6 +197,10 @@ def load_resnet_c2_format(cfg, f):
     arch = arch.replace("-RETINANET", "")
     stages = _C2_STAGE_NAMES[arch]
     state_dict = _rename_weights_for_resnet(state_dict, stages)
+    # ***********************************
+    # for deformable convolutional layer
+    state_dict = _rename_conv_weights_for_deformable_conv_layers(state_dict, cfg)
+    # ***********************************
     return dict(model=state_dict)
 
 

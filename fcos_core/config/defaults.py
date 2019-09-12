@@ -278,6 +278,11 @@ _C.MODEL.RESNETS.BACKBONE_OUT_CHANNELS = 256 * 4
 _C.MODEL.RESNETS.RES2_OUT_CHANNELS = 256
 _C.MODEL.RESNETS.STEM_OUT_CHANNELS = 64
 
+# Deformable convolutions
+_C.MODEL.RESNETS.STAGE_WITH_DCN = (False, False, False, False)
+_C.MODEL.RESNETS.WITH_MODULATED_DCN = False
+_C.MODEL.RESNETS.DEFORMABLE_GROUPS = 1
+
 # ---------------------------------------------------------------------------- #
 # FCOS Options
 # ---------------------------------------------------------------------------- #
@@ -296,6 +301,16 @@ _C.MODEL.FCOS.LOSS_GAMMA = 2.0
 
 # the number of convolutions used in the cls and bbox tower
 _C.MODEL.FCOS.NUM_CONVS = 4
+
+# if CENTER_SAMPLING_RADIUS <= 0, it will disable center sampling
+_C.MODEL.FCOS.CENTER_SAMPLING_RADIUS = 0.0
+# IOU_LOSS_TYPE can be "iou", "linear_iou" or "giou"
+_C.MODEL.FCOS.IOU_LOSS_TYPE = "iou"
+
+_C.MODEL.FCOS.NORM_REG_TARGETS = False
+_C.MODEL.FCOS.CENTERNESS_ON_REG = False
+
+_C.MODEL.FCOS.USE_DCN_IN_TOWER = False
 
 # ---------------------------------------------------------------------------- #
 # RetinaNet Options (Follow the Detectron version)
@@ -403,6 +418,8 @@ _C.SOLVER.MAX_ITER = 40000
 
 _C.SOLVER.BASE_LR = 0.001
 _C.SOLVER.BIAS_LR_FACTOR = 2
+# the learning rate factor of deformable convolution offsets
+_C.SOLVER.DCONV_OFFSETS_LR_FACTOR = 1.0
 
 _C.SOLVER.MOMENTUM = 0.9
 
@@ -423,6 +440,7 @@ _C.SOLVER.CHECKPOINT_PERIOD = 2500
 # see 2 images per batch
 _C.SOLVER.IMS_PER_BATCH = 16
 
+
 # ---------------------------------------------------------------------------- #
 # Specific test options
 # ---------------------------------------------------------------------------- #
@@ -435,6 +453,28 @@ _C.TEST.EXPECTED_RESULTS_SIGMA_TOL = 4
 _C.TEST.IMS_PER_BATCH = 8
 # Number of detections per image
 _C.TEST.DETECTIONS_PER_IMG = 100
+
+
+# ---------------------------------------------------------------------------- #
+# Test-time augmentations for bounding box detection
+# See configs/test_time_aug/e2e_mask_rcnn_R-50-FPN_1x.yaml for an example
+# ---------------------------------------------------------------------------- #
+_C.TEST.BBOX_AUG = CN()
+
+ # Enable test-time augmentation for bounding box detection if True
+_C.TEST.BBOX_AUG.ENABLED = False
+
+ # Horizontal flip at the original scale (id transform)
+_C.TEST.BBOX_AUG.H_FLIP = False
+
+ # Each scale is the pixel size of an image's shortest side
+_C.TEST.BBOX_AUG.SCALES = ()
+
+ # Max pixel size of the longer side
+_C.TEST.BBOX_AUG.MAX_SIZE = 4000
+
+ # Horizontal flip at each scale
+_C.TEST.BBOX_AUG.SCALE_H_FLIP = False
 
 
 # ---------------------------------------------------------------------------- #
